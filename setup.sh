@@ -38,7 +38,7 @@ echo "⏳ Waiting for PostgreSQL to be ready..."
 sleep 10
 
 echo "🔧 Running database migrations..."
-docker-compose run --rm api alembic upgrade head
+docker-compose run --rm backend alembic upgrade head
 
 echo "🚀 Starting all services..."
 docker-compose up -d
@@ -46,9 +46,9 @@ docker-compose up -d
 echo "✅ Setup complete!"
 echo ""
 echo "📋 Service Information:"
-echo "• Frontend: http://hate.local:3000"
-echo "• Backend API: http://hate.local:8000"
-echo "• API Documentation: http://hate.local:8000/docs"
+echo "• Frontend: http://localhost"
+echo "• Backend API: http://localhost/api"
+echo "• API Documentation: http://localhost/api/docs"
 echo "• PostgreSQL: hate.local:5432"
 echo "• Redis: hate.local:6379"
 echo ""
@@ -56,6 +56,6 @@ echo "🛠️ Development Commands:"
 echo "• View logs: docker-compose logs -f"
 echo "• Stop services: docker-compose down"
 echo "• Restart services: docker-compose restart"
-echo "• Access backend shell: docker-compose exec api bash"
+echo "• Access backend shell: docker-compose exec backend bash"
 echo ""
 echo "📖 See README.md for more information."

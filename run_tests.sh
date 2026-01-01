@@ -119,9 +119,9 @@ else
     # Running locally, use Docker Compose
     if [ "$WATCH" = true ]; then
         echo "Watch mode requires running inside the container."
-        echo "Use: docker-compose exec api bash, then run this script with --watch"
+        echo "Use: docker-compose exec backend bash, then run this script with --watch"
         exit 1
     fi
     
-    docker-compose run --rm api $PYTEST_CMD
+    docker-compose run --rm backend $PYTEST_CMD
 fi

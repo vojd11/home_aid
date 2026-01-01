@@ -21,7 +21,7 @@ services:
     volumes:
       - redis_data:/data
 
-  api:
+  backend:
     build: ./backend
     ports:
       - "8000:8000"
@@ -51,6 +51,16 @@ services:
       - ./backend:/app
     command: celery -A app.worker.celery worker --loglevel=info
 
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - frontend
+      - backend
+
   frontend:
     build: ./frontend
     ports:
@@ -59,7 +69,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://hate.local:8000
+      - VITE_API_URL=
     command: npm run dev
 
 volumes:

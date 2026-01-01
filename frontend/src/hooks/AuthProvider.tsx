@@ -48,15 +48,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         // Add small delay for Safari to ensure localStorage is ready
         await new Promise(resolve => setTimeout(resolve, 50))
-        
-        const token = safariStorage.getItem('access_token')
-        console.log('Auth initialization - token found:', !!token)
-        
-        setHasToken(!!token)
+
+        const accessToken = safariStorage.getItem('access_token')
+        const refreshToken = safariStorage.getItem('refresh_token')
+        const hasAnyToken = !!accessToken || !!refreshToken
+
+        console.log('Auth initialization - tokens found:', { access: !!accessToken, refresh: !!refreshToken })
+
+        setHasToken(hasAnyToken)
         setIsInitialized(true)
-        
-        // If no token, clear user state immediately
-        if (!token) {
+
+        // If no tokens, clear user state immediately
+        if (!hasAnyToken) {
           setUser(null)
         }
       } catch (error) {
@@ -104,7 +107,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginMutation = useMutation({
     mutationFn: async (credentials: LoginForm) => {
-      const response = await api.post('/auth/login', credentials)
+      const response = await api.post('/auth/login', credentials, {
+        headers: { 'X-Login-Request': 'true' }
+      })
       return response.data
     },
     onSuccess: (data: any) => {
@@ -121,6 +126,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await api.post('/auth/register', {
         email: userData.email,
         password: userData.password,
+      }, {
+        headers: { 'X-Login-Request': 'true' }
       })
       return response.data
     },
@@ -150,10 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient])
 
   // Calculate loading state more carefully with timeout protection
-  const isLoading = !isInitialized || 
-    (hasToken && !user && queryIsLoading && !queryError) || 
-    loginMutation.isPending || 
-    registerMutation.isPending
+  const isLoading = !isInitialized ||
+    (hasToken && !user && queryIsLoading && !queryError)
 
   // Debug logging in development
   useEffect(() => {
@@ -173,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [isInitialized, hasToken, user, queryIsLoading, queryError, isLoading, loginMutation.isPending, registerMutation.isPending])
 
-  // Memoize the context value to prevent unnecessary re-renders
+  // Memorize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
     user,
     isLoading,

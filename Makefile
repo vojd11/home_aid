@@ -16,39 +16,39 @@ logs:
 
 # Database commands
 db-migrate:
-	docker-compose run --rm api alembic upgrade head
+	docker-compose run --rm backend alembic upgrade head
 
 db-rollback:
-	docker-compose run --rm api alembic downgrade -1
+	docker-compose run --rm backend alembic downgrade -1
 
 db-reset:
 	docker-compose down -v
 	docker-compose up -d postgres redis
 	sleep 10
-	docker-compose run --rm api alembic upgrade head
+	docker-compose run --rm backend alembic upgrade head
 
 # Backend commands
 backend-shell:
-	docker-compose exec api bash
+	docker-compose exec backend bash
 
 # Test commands
 test:
-	docker-compose run --rm api python -m pytest tests/ -v
+	docker-compose run --rm backend python -m pytest tests/ -v
 
 test-unit:
-	docker-compose run --rm api python -m pytest tests/unit/ -v
+	docker-compose run --rm backend python -m pytest tests/unit/ -v
 
 test-api:
-	docker-compose run --rm api python -m pytest tests/api/ -v
+	docker-compose run --rm backend python -m pytest tests/api/ -v
 
 test-integration:
-	docker-compose run --rm api python -m pytest tests/integration/ -v
+	docker-compose run --rm backend python -m pytest tests/integration/ -v
 
 test-services:
-	docker-compose run --rm api python -m pytest tests/services/ -v
+	docker-compose run --rm backend python -m pytest tests/services/ -v
 
 test-coverage:
-	docker-compose run --rm api python -m pytest tests/ --cov=app --cov-report=html --cov-report=term
+	docker-compose run --rm backend python -m pytest tests/ --cov=app --cov-report=html --cov-report=term
 
 backend-test: test
 

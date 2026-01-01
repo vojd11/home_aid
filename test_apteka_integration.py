@@ -7,7 +7,7 @@ import sys
 import os
 
 # Add the backend directory to the path
-sys.path.append('/home/vojd/projects/home_aid_sonnet/backend')
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backend'))
 
 async def test_apteka_integration():
     """Test the Apteka.net.ua integration in the store prices service"""
