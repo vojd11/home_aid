@@ -3,6 +3,7 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15
+    restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -16,6 +17,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: always
     ports:
       - "6379:6379"
     volumes:
@@ -23,6 +25,7 @@ services:
 
   backend:
     build: ./backend
+    restart: always
     ports:
       - "8000:8000"
     environment:
@@ -39,6 +42,7 @@ services:
 
   worker:
     build: ./backend
+    restart: always
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/home_aid_kit
       - REDIS_URL=redis://redis:6379/0
@@ -53,6 +57,7 @@ services:
 
   nginx:
     image: nginx:alpine
+    restart: always
     ports:
       - "80:80"
     volumes:
@@ -63,6 +68,7 @@ services:
 
   frontend:
     build: ./frontend
+    restart: always
     ports:
       - "3000:3000"
     volumes:
