@@ -8,8 +8,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: home_aid_kit
-    ports:
-      - "5432:5432"
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -18,16 +17,14 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    ports:
-      - "6379:6379"
+
     volumes:
       - redis_data:/data
 
   backend:
     build: ./backend
     restart: always
-    ports:
-      - "8000:8000"
+
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/home_aid_kit
       - REDIS_URL=redis://redis:6379/0
@@ -69,8 +66,7 @@ services:
   frontend:
     build: ./frontend
     restart: always
-    ports:
-      - "3000:3000"
+
     volumes:
       - ./frontend:/app
       - /app/node_modules
