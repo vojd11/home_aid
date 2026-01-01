@@ -71,7 +71,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=
+      - VITE_API_URL=/home_aid
     command: npm run dev
 
 volumes:
