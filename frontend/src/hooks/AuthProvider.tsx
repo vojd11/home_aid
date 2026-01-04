@@ -134,7 +134,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onSuccess: (data: any) => {
       safariStorage.setItem('access_token', data.access_token)
       safariStorage.setItem('refresh_token', data.refresh_token)
-      setUser(data.user)
+      // Login endpoint returns tokens, but not user object usually. 
+      // User will be fetched by invalidateQueries below.
       setHasToken(true)
       queryClient.invalidateQueries({ queryKey: ['currentUser'] })
     },

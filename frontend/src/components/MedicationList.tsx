@@ -48,7 +48,7 @@ export default function MedicationList({ householdId, householdName }: Medicatio
   const { data: medicationData, isLoading, error } = useQuery({
     queryKey: ['medications', householdId],
     queryFn: async () => {
-      const response = await api.get(`/households/${householdId}/medications/`)
+      const response = await api.get(`/households/${householdId}/medications`)
       return response.data
     },
     enabled: !!householdId,
@@ -64,7 +64,7 @@ export default function MedicationList({ householdId, householdName }: Medicatio
     // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim()
-      filtered = filtered.filter(med => 
+      filtered = filtered.filter(med =>
         med.name.toLowerCase().includes(query) ||
         (med.notes && med.notes.toLowerCase().includes(query)) ||
         (med.tags && med.tags.some(tag => tag.toLowerCase().includes(query)))
@@ -73,7 +73,7 @@ export default function MedicationList({ householdId, householdName }: Medicatio
 
     // Filter by selected tag
     if (selectedTag) {
-      filtered = filtered.filter(med => 
+      filtered = filtered.filter(med =>
         med.tags && med.tags.includes(selectedTag)
       )
     }
@@ -88,7 +88,7 @@ export default function MedicationList({ householdId, householdName }: Medicatio
   // Decrement medication mutation
   const decrementMutation = useMutation({
     mutationFn: async (medicationId) => {
-      await api.post(`/households/${householdId}/medications/${medicationId}/decrement/`)
+      await api.post(`/households/${householdId}/medications/${medicationId}/decrement`)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medications', householdId] })
@@ -98,7 +98,7 @@ export default function MedicationList({ householdId, householdName }: Medicatio
   // Delete medication mutation
   const deleteMutation = useMutation({
     mutationFn: async (medicationId) => {
-      await api.delete(`/households/${householdId}/medications/${medicationId}/`)
+      await api.delete(`/households/${householdId}/medications/${medicationId}`)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['medications', householdId] })
@@ -144,17 +144,17 @@ export default function MedicationList({ householdId, householdName }: Medicatio
 
   if (error) {
     return (
-      <Alert 
-        severity="error" 
-        sx={{ 
-          borderRadius: 3, 
+      <Alert
+        severity="error"
+        sx={{
+          borderRadius: 3,
           p: 3,
           textAlign: 'center',
           '& .MuiAlert-icon': { fontSize: 48, mb: 2 }
         }}
         action={
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             onClick={() => window.location.reload()}
             sx={{ mt: 2 }}
           >
@@ -187,32 +187,32 @@ export default function MedicationList({ householdId, householdName }: Medicatio
               {householdName} Medications
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-              <Chip 
+              <Chip
                 icon={<LocalHospital />}
-                label={`${totalMedications} total`} 
+                label={`${totalMedications} total`}
                 variant="outlined"
                 color="primary"
               />
               {(searchQuery || selectedTag) && (
-                <Chip 
+                <Chip
                   icon={<Search />}
-                  label={`${medications.length} shown`} 
+                  label={`${medications.length} shown`}
                   variant="filled"
                   color="info"
                   size="small"
                 />
               )}
               {lowStockCount > 0 && (
-                <Chip 
+                <Chip
                   icon={<Warning />}
-                  label={`${lowStockCount} low stock`} 
+                  label={`${lowStockCount} low stock`}
                   color="warning"
                 />
               )}
               {outOfStockCount > 0 && (
-                <Chip 
+                <Chip
                   icon={<Error />}
-                  label={`${outOfStockCount} out of stock`} 
+                  label={`${outOfStockCount} out of stock`}
                   color="error"
                 />
               )}
@@ -317,7 +317,7 @@ export default function MedicationList({ householdId, householdName }: Medicatio
               >
                 <LocalHospital sx={{ fontSize: 48, color: 'primary.main' }} />
               </Box>
-              
+
               {searchQuery || selectedTag ? (
                 <>
                   <Typography variant="h5" sx={{ fontWeight: 600, mb: 2 }}>
@@ -360,7 +360,7 @@ export default function MedicationList({ householdId, householdName }: Medicatio
                     Keep track of your medications, quantities, and important information all in one place.
                     Get started by adding your first medication.
                   </Typography>
-                  
+
                   <Button
                     variant="contained"
                     size="large"
@@ -384,7 +384,7 @@ export default function MedicationList({ householdId, householdName }: Medicatio
                   >
                     Add Your First Medication
                   </Button>
-                  
+
                   {/* Feature highlights */}
                   <Card variant="outlined" sx={{ mt: 4, textAlign: 'left', backgroundColor: 'grey.50' }}>
                     <CardContent sx={{ p: 3 }}>
