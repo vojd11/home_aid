@@ -45,13 +45,17 @@ interface AddMedicationDialogProps {
   isOpen: boolean
   onClose: () => void
   householdId: number
+  // Optional prefilled values (e.g. coming from a barcode scan)
+  initialBarcode?: string
+  initialName?: string
 }
 
-export default function AddMedicationDialog({ isOpen, onClose, householdId }: AddMedicationDialogProps) {
+export default function AddMedicationDialog({ isOpen, onClose, householdId, initialBarcode, initialName }: AddMedicationDialogProps) {
   const queryClient = useQueryClient()
   const [tags, setTags] = useState([])
   const [currentTag, setCurrentTag] = useState('')
   const [medicationName, setMedicationName] = useState('')
+  const [barcode, setBarcode] = useState('')
   const [selectedDRLZMedication, setSelectedDRLZMedication] = useState<DRLZMedication | null>(null)
   const [drlzSearchQuery, setDrlzSearchQuery] = useState('')
 
@@ -70,6 +74,19 @@ export default function AddMedicationDialog({ isOpen, onClose, householdId }: Ad
   })
 
   const watchedName = watch('name')
+
+  // Apply prefilled values (e.g. from a barcode scan) when the dialog opens
+  useEffect(() => {
+    if (isOpen) {
+      if (initialBarcode) {
+        setBarcode(initialBarcode)
+      }
+      if (initialName) {
+        setValue('name', initialName)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialBarcode, initialName])
 
   // DRLZ search query
   const { data: drlzResults, isLoading: isDrlzLoading, error: drlzError } = useQuery({
@@ -102,7 +119,8 @@ export default function AddMedicationDialog({ isOpen, onClose, householdId }: Ad
       const enhancedData = {
         ...data,
         tabletki_link,
-        tags // Include tags in the submission
+        tags, // Include tags in the submission
+        barcode: barcode || undefined // Persist scanned barcode when present
       }
       
       const response = await api.post(`/households/${householdId}/medications/`, enhancedData)
@@ -119,6 +137,7 @@ export default function AddMedicationDialog({ isOpen, onClose, householdId }: Ad
     setTags([])
     setCurrentTag('')
     setMedicationName('')
+    setBarcode('')
     setSelectedDRLZMedication(null)
     setDrlzSearchQuery('')
     onClose()
@@ -377,6 +396,18 @@ export default function AddMedicationDialog({ isOpen, onClose, householdId }: Ad
             error={!!errors.quantity}
             helperText={errors.quantity?.message || 'Number of items you currently have'}
             sx={{ mb: 3 }}
+          />
+
+          {/* Barcode */}
+          <TextField
+            value={barcode}
+            onChange={(e) => setBarcode(e.target.value)}
+            label="Barcode (optional)"
+            placeholder="Scanned package barcode"
+            fullWidth
+            inputProps={{ inputMode: 'numeric' }}
+            sx={{ mb: 3 }}
+            helperText="Saved so scanning this package later updates its quantity"
           />
 
           {/* Notes */}

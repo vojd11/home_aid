@@ -96,6 +96,41 @@ export const drlzApi = {
   }
 }
 
+// Medication API helpers (barcode scanning / quantity adjustments)
+export const medicationApi = {
+  // Look up a medication in a household by scanned barcode
+  lookupByBarcode: async (householdId: number, barcode: string) => {
+    const response = await api.get(`/households/${householdId}/medications/lookup`, {
+      params: { barcode },
+    })
+    return response.data as {
+      found: boolean
+      barcode: string
+      medication: import('../types').Medication | null
+    }
+  },
+
+  // Increase quantity of an existing medication
+  increment: async (householdId: number, medicationId: number, amount: number = 1) => {
+    const response = await api.post(
+      `/households/${householdId}/medications/${medicationId}/increment`,
+      null,
+      { params: { amount } }
+    )
+    return response.data
+  },
+
+  // Decrease quantity of an existing medication
+  decrement: async (householdId: number, medicationId: number, amount: number = 1) => {
+    const response = await api.post(
+      `/households/${householdId}/medications/${medicationId}/decrement`,
+      null,
+      { params: { amount } }
+    )
+    return response.data
+  },
+}
+
 // Auth API - alias for the main api instance with authentication
 export const authApi = api
 

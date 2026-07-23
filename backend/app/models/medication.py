@@ -18,6 +18,7 @@ class Medication(Base):
     household_id = Column(BigInteger, ForeignKey("households.id", ondelete="CASCADE"), nullable=False)
     name_raw = Column(String, nullable=False)
     name_norm = Column(String, nullable=False, index=True)
+    barcode = Column(String, nullable=True, index=True)  # Scanned package barcode (e.g. EAN-13)
     quantity = Column(Integer, nullable=False, default=0)
     description = Column(Text, nullable=True)  # For DRLZ description
     drlz_link = Column(Text, nullable=True)  # Link to DRLZ medication page

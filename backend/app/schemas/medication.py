@@ -8,6 +8,7 @@ class MedicationBase(BaseModel):
     quantity: conint(ge=0) = 0
     description: Optional[str] = None
     notes: Optional[str] = None
+    barcode: Optional[str] = None
 
 
 class MedicationCreate(MedicationBase):
@@ -22,6 +23,7 @@ class MedicationUpdate(BaseModel):
     quantity: Optional[conint(ge=0)] = None
     description: Optional[str] = None
     notes: Optional[str] = None
+    barcode: Optional[str] = None
     tags: Optional[List[str]] = None
 
 
@@ -51,6 +53,13 @@ class MedicationList(BaseModel):
 
 class MedicationDecrement(BaseModel):
     amount: conint(ge=1) = 1
+
+
+class MedicationLookupResponse(BaseModel):
+    """Result of looking up a medication by scanned barcode within a household."""
+    found: bool
+    barcode: str
+    medication: Optional[MedicationResponse] = None
 
 
 class TagBase(BaseModel):

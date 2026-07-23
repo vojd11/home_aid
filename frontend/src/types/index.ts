@@ -35,6 +35,7 @@ export const MedicationSchema = z.object({
   id: z.number(),
   name: z.string(),
   quantity: z.number(),
+  barcode: z.string().nullable().optional(),
   description: z.string().optional(),
   drlz_link: z.string().url().optional(),
   drlz_instruction_link: z.string().url().optional(),
@@ -55,6 +56,7 @@ export const MedicationListSchema = z.object({
 export const CreateMedicationSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   quantity: z.number().min(0, 'Quantity must be non-negative').default(0),
+  barcode: z.string().optional(),
   description: z.string().optional(),
   notes: z.string().optional(),
   drlz_link: z.string().url().optional(),
