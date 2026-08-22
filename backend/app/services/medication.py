@@ -87,6 +87,7 @@ class MedicationService:
             household_id=household_id,
             name_raw=medication_data.name,
             name_norm=name_norm,
+            barcode=medication_data.barcode,
             quantity=medication_data.quantity,
             description=medication_data.description,
             drlz_link=medication_data.drlz_link,
@@ -212,6 +213,70 @@ class MedicationService:
         if not medication:
             return None
         
+        return await self._medication_to_response(medication)
+
+    async def get_medication_by_barcode(
+        self, household_id: int, barcode: str
+    ) -> Optional[MedicationResponse]:
+        """Find a medication in a household by its scanned barcode."""
+        barcode = (barcode or "").strip()
+        if not barcode:
+            return None
+
+        result = await self.db.execute(
+            select(Medication)
+            .where(
+                and_(
+                    Medication.household_id == household_id,
+                    Medication.barcode == barcode
+                )
+            )
+            .order_by(Medication.id)
+        )
+        medication = result.scalars().first()
+        if not medication:
+            return None
+
+        return await self._medication_to_response(medication)
+
+    async def increment_medication(
+        self,
+        medication_id: int,
+        household_id: int,
+        amount: int,
+        user_id: int
+    ) -> MedicationResponse:
+        """Increment medication quantity (e.g. when restocking a scanned item)."""
+        result = await self.db.execute(
+            select(Medication).where(
+                and_(
+                    Medication.id == medication_id,
+                    Medication.household_id == household_id
+                )
+            )
+        )
+        medication = result.scalar_one_or_none()
+        if not medication:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Medication not found"
+            )
+
+        medication.quantity += amount
+        medication.updated_at = datetime.utcnow()
+
+        # Log inventory event
+        inventory_event = InventoryEvent(
+            medication_id=medication.id,
+            user_id=user_id,
+            delta=amount,
+            reason=EventReason.ADD
+        )
+        self.db.add(inventory_event)
+
+        await self.db.commit()
+        await self.db.refresh(medication)
+
         return await self._medication_to_response(medication)
 
     async def update_medication(
@@ -374,6 +439,7 @@ class MedicationService:
             household_id=medication.household_id,
             name=medication.name_raw,
             name_norm=medication.name_norm,
+            barcode=medication.barcode,
             quantity=medication.quantity,
             description=medication.description,
             drlz_link=medication.drlz_link,
