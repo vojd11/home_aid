@@ -120,7 +120,7 @@ export default function AddMedicationDialog({ isOpen, onClose, householdId, init
         ...data,
         tabletki_link,
         tags, // Include tags in the submission
-        barcode: barcode || undefined // Persist scanned barcode when present
+        barcode: barcode.trim() || undefined // Persist scanned barcode when present
       }
       
       const response = await api.post(`/households/${householdId}/medications/`, enhancedData)

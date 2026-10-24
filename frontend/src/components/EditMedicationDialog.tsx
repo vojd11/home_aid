@@ -33,6 +33,7 @@ import api from '../lib/api'
 const EditMedicationSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   quantity: z.number().min(0, 'Quantity must be non-negative'),
+  barcode: z.string().optional(),
   notes: z.string().optional(),
 })
 
@@ -65,6 +66,7 @@ export default function EditMedicationDialog({
     defaultValues: {
       name: medication.name,
       quantity: medication.quantity,
+      barcode: medication.barcode || '',
       notes: medication.notes || '',
     },
   })
@@ -75,6 +77,7 @@ export default function EditMedicationDialog({
       reset({
         name: medication.name,
         quantity: medication.quantity,
+        barcode: medication.barcode || '',
         notes: medication.notes || '',
       })
       setTags(medication.tags)
@@ -183,6 +186,17 @@ export default function EditMedicationDialog({
             fullWidth
             error={!!errors.quantity}
             helperText={errors.quantity?.message || 'Number of items you currently have'}
+            sx={{ mb: 3 }}
+          />
+
+          {/* Barcode */}
+          <TextField
+            {...register('barcode')}
+            label="Barcode (optional)"
+            placeholder="Scanned package barcode"
+            fullWidth
+            inputProps={{ inputMode: 'numeric' }}
+            helperText="Scanning a package with this barcode updates this medication"
             sx={{ mb: 3 }}
           />
 

@@ -129,6 +129,15 @@ export const medicationApi = {
     )
     return response.data
   },
+
+  // Attach a scanned barcode to an existing medication
+  setBarcode: async (householdId: number, medicationId: number, barcode: string) => {
+    const response = await api.patch(
+      `/households/${householdId}/medications/${medicationId}`,
+      { barcode }
+    )
+    return response.data
+  },
 }
 
 // Auth API - alias for the main api instance with authentication

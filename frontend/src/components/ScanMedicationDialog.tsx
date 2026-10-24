@@ -15,6 +15,7 @@ import {
   Alert,
   Chip,
   Divider,
+  Autocomplete,
 } from '@mui/material'
 import {
   Close,
@@ -25,8 +26,17 @@ import {
   CheckCircle,
   Keyboard,
   CameraAlt,
+  Link as LinkIcon,
 } from '@mui/icons-material'
-import { medicationApi } from '../lib/api'
+import api, { medicationApi } from '../lib/api'
+
+const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code']
+
+// Browsers only expose the camera on secure pages (HTTPS or localhost)
+const isSecureContext = typeof window !== 'undefined' && window.isSecureContext
+const cameraAvailable =
+  isSecureContext && typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+const barcodeDetectorSupported = typeof window !== 'undefined' && 'BarcodeDetector' in window
 
 interface ScanMedicationDialogProps {
   isOpen: boolean
@@ -49,15 +59,19 @@ export default function ScanMedicationDialog({
   const [useManual, setUseManual] = useState(false)
   const [cameraError, setCameraError] = useState('')
   const [amount, setAmount] = useState(1)
+  const [linkTarget, setLinkTarget] = useState(null)
 
   const videoRef = useRef(null)
   const streamRef = useRef(null)
   const detectorRef = useRef(null)
+  const zxingControlsRef = useRef(null)
   const rafRef = useRef(null)
   const runningRef = useRef(false)
+  // Bumped whenever the camera is stopped, so a start still waiting for
+  // camera permission knows it was cancelled and releases the camera
+  const sessionRef = useRef(0)
 
-  const barcodeDetectorSupported =
-    typeof window !== 'undefined' && 'BarcodeDetector' in window
+  const showCamera = cameraAvailable && !useManual
 
   // Look up the barcode once we have one
   const {
@@ -73,11 +87,27 @@ export default function ScanMedicationDialog({
 
   const foundMedication = lookup?.found ? lookup.medication : null
 
+  // Medications without a barcode can be linked to an unknown scan
+  const { data: medicationData } = useQuery({
+    queryKey: ['medications', householdId],
+    queryFn: async () => {
+      const response = await api.get(`/households/${householdId}/medications`)
+      return response.data
+    },
+    enabled: isOpen && !!householdId,
+  })
+  const linkCandidates = (medicationData?.medications || []).filter((med) => !med.barcode)
+
   const stopCamera = useCallback(() => {
+    sessionRef.current += 1
     runningRef.current = false
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
+    }
+    if (zxingControlsRef.current) {
+      zxingControlsRef.current.stop()
+      zxingControlsRef.current = null
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
@@ -88,17 +118,20 @@ export default function ScanMedicationDialog({
     }
   }, [])
 
+  const handleDetected = useCallback((value) => {
+    const code = String(value || '').trim()
+    if (!code) return false
+    stopCamera()
+    setBarcode(code)
+    return true
+  }, [stopCamera])
+
   const scanLoop = useCallback(async () => {
     if (!runningRef.current || !detectorRef.current || !videoRef.current) return
     try {
       const codes = await detectorRef.current.detect(videoRef.current)
-      if (codes && codes.length > 0 && codes[0].rawValue) {
-        const value = String(codes[0].rawValue).trim()
-        if (value) {
-          stopCamera()
-          setBarcode(value)
-          return
-        }
+      if (codes && codes.length > 0 && handleDetected(codes[0].rawValue)) {
+        return
       }
     } catch {
       // Ignore transient detection errors and keep scanning
@@ -106,47 +139,67 @@ export default function ScanMedicationDialog({
     if (runningRef.current) {
       rafRef.current = requestAnimationFrame(scanLoop)
     }
-  }, [stopCamera])
+  }, [handleDetected])
 
   const startCamera = useCallback(async () => {
-    if (!barcodeDetectorSupported) {
-      setUseManual(true)
-      return
-    }
+    const session = sessionRef.current
     setCameraError('')
     try {
-      if (!detectorRef.current) {
-        try {
-          detectorRef.current = new window.BarcodeDetector({
-            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'],
-          })
-        } catch {
-          detectorRef.current = new window.BarcodeDetector()
+      if (barcodeDetectorSupported) {
+        if (!detectorRef.current) {
+          try {
+            detectorRef.current = new window.BarcodeDetector({ formats: BARCODE_FORMATS })
+          } catch {
+            detectorRef.current = new window.BarcodeDetector()
+          }
         }
-      }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-        audio: false,
-      })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        })
+        if (session !== sessionRef.current) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+        streamRef.current = stream
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          await videoRef.current.play()
+        }
+        runningRef.current = true
+        rafRef.current = requestAnimationFrame(scanLoop)
+      } else {
+        // No native BarcodeDetector (e.g. iOS Safari): decode video frames with
+        // ZXing, loaded on demand to keep it out of the main bundle
+        const { BrowserMultiFormatReader } = await import('@zxing/browser')
+        if (session !== sessionRef.current) return
+
+        const controls = await new BrowserMultiFormatReader().decodeFromConstraints(
+          { video: { facingMode: 'environment' }, audio: false },
+          videoRef.current,
+          (result, _error, scanControls) => {
+            if (result && handleDetected(result.getText())) {
+              scanControls.stop()
+            }
+          }
+        )
+        if (session !== sessionRef.current) {
+          controls.stop()
+          return
+        }
+        zxingControlsRef.current = controls
       }
-      runningRef.current = true
-      rafRef.current = requestAnimationFrame(scanLoop)
-    } catch (err) {
-      setCameraError(
-        'Unable to access the camera. You can enter the barcode manually instead.'
-      )
+    } catch {
+      if (session !== sessionRef.current) return
+      setCameraError('Unable to access the camera. You can enter the barcode manually instead.')
       setUseManual(true)
     }
-  }, [barcodeDetectorSupported, scanLoop])
+  }, [scanLoop, handleDetected])
 
   // Manage camera based on dialog / barcode / manual state
   useEffect(() => {
-    if (isOpen && !barcode && !useManual) {
+    if (isOpen && !barcode && !useManual && cameraAvailable) {
       startCamera()
     }
     return () => {
@@ -173,25 +226,36 @@ export default function ScanMedicationDialog({
     },
   })
 
-  const resetToScan = () => {
+  const linkMutation = useMutation({
+    mutationFn: (medicationId: number) =>
+      medicationApi.setBarcode(householdId, medicationId, barcode),
+    onSuccess: (medication) => {
+      // The scanned barcode now belongs to this medication
+      queryClient.setQueryData(['med-lookup', householdId, barcode], {
+        found: true,
+        barcode,
+        medication,
+      })
+      queryClient.invalidateQueries({ queryKey: ['medications', householdId] })
+      setLinkTarget(null)
+    },
+  })
+
+  const resetState = () => {
     stopCamera()
     setBarcode('')
     setManualEntry('')
     setAmount(1)
+    setUseManual(false)
+    setLinkTarget(null)
     incrementMutation.reset()
     decrementMutation.reset()
-    setUseManual(false)
+    linkMutation.reset()
   }
 
   const handleClose = () => {
-    stopCamera()
-    setBarcode('')
-    setManualEntry('')
-    setAmount(1)
-    setUseManual(false)
+    resetState()
     setCameraError('')
-    incrementMutation.reset()
-    decrementMutation.reset()
     onClose()
   }
 
@@ -233,7 +297,7 @@ export default function ScanMedicationDialog({
         {/* Scanning stage */}
         {!barcode && (
           <Box>
-            {!useManual && barcodeDetectorSupported && (
+            {showCamera && (
               <>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                   Point your camera at the barcode on the medication package.
@@ -272,21 +336,33 @@ export default function ScanMedicationDialog({
               </>
             )}
 
+            {!cameraAvailable && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                {isSecureContext
+                  ? "This browser can't access the camera. Enter the barcode number manually below."
+                  : 'The camera only works when the app is opened over HTTPS. Enter the barcode number manually below.'}
+              </Alert>
+            )}
+
             {cameraError && (
               <Alert severity="warning" sx={{ mb: 2 }}>
                 {cameraError}
               </Alert>
             )}
 
-            {!barcodeDetectorSupported && !useManual && (
-              <Alert severity="info" sx={{ mb: 2 }}>
-                Live barcode scanning isn't supported by this browser. Enter the
-                barcode number manually below.
-              </Alert>
-            )}
-
             {/* Manual entry */}
-            {(useManual || !barcodeDetectorSupported) ? (
+            {showCamera ? (
+              <Button
+                variant="text"
+                startIcon={<Keyboard />}
+                onClick={() => {
+                  stopCamera()
+                  setUseManual(true)
+                }}
+              >
+                Enter barcode manually
+              </Button>
+            ) : (
               <Box component="form" onSubmit={handleManualSubmit}>
                 <TextField
                   value={manualEntry}
@@ -307,7 +383,7 @@ export default function ScanMedicationDialog({
                   >
                     Look up
                   </Button>
-                  {barcodeDetectorSupported && (
+                  {cameraAvailable && (
                     <Button
                       variant="outlined"
                       startIcon={<CameraAlt />}
@@ -321,17 +397,6 @@ export default function ScanMedicationDialog({
                   )}
                 </Box>
               </Box>
-            ) : (
-              <Button
-                variant="text"
-                startIcon={<Keyboard />}
-                onClick={() => {
-                  stopCamera()
-                  setUseManual(true)
-                }}
-              >
-                Enter barcode manually
-              </Button>
             )}
           </Box>
         )}
@@ -346,7 +411,7 @@ export default function ScanMedicationDialog({
                 variant="outlined"
                 color="primary"
               />
-              <Button size="small" startIcon={<Replay />} onClick={resetToScan}>
+              <Button size="small" startIcon={<Replay />} onClick={resetState}>
                 Scan again
               </Button>
             </Box>
@@ -458,7 +523,7 @@ export default function ScanMedicationDialog({
               </Box>
             )}
 
-            {/* Unknown barcode → suggest creating */}
+            {/* Unknown barcode → suggest creating, or linking to an existing medication */}
             {!isLookingUp && lookup && !foundMedication && (
               <Box>
                 <Alert severity="info" sx={{ mb: 2 }}>
@@ -486,6 +551,43 @@ export default function ScanMedicationDialog({
                 >
                   Create new medication
                 </Button>
+
+                {linkCandidates.length > 0 && (
+                  <Box sx={{ mt: 3 }}>
+                    <Divider sx={{ mb: 2 }}>or</Divider>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                      Already have this medication? Link the barcode to it.
+                    </Typography>
+                    {linkMutation.isError && (
+                      <Alert severity="error" sx={{ mb: 2 }}>
+                        {linkMutation.error?.response?.data?.detail ||
+                          'Failed to link the barcode. Please try again.'}
+                      </Alert>
+                    )}
+                    <Autocomplete
+                      options={linkCandidates}
+                      getOptionLabel={(med) => med.name}
+                      isOptionEqualToValue={(option, value) => option.id === value.id}
+                      value={linkTarget}
+                      onChange={(_event, value) => setLinkTarget(value)}
+                      renderInput={(params) => (
+                        <TextField {...params} label="Existing medication" size="small" />
+                      )}
+                      sx={{ mb: 1.5 }}
+                    />
+                    <Button
+                      fullWidth
+                      variant="outlined"
+                      startIcon={
+                        linkMutation.isPending ? <CircularProgress size={16} color="inherit" /> : <LinkIcon />
+                      }
+                      disabled={!linkTarget || linkMutation.isPending}
+                      onClick={() => linkMutation.mutate(linkTarget.id)}
+                    >
+                      Link barcode
+                    </Button>
+                  </Box>
+                )}
               </Box>
             )}
           </Box>
