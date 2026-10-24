@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Integer, Text, func, Table
+from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Integer, Text, func, Table, Index, text
 from sqlalchemy.orm import relationship
 from .user import Base
 
@@ -13,12 +13,22 @@ medication_tags = Table(
 
 class Medication(Base):
     __tablename__ = "medications"
+    __table_args__ = (
+        # A barcode identifies at most one medication per household
+        Index(
+            "uq_medications_household_barcode",
+            "household_id",
+            "barcode",
+            unique=True,
+            postgresql_where=text("barcode IS NOT NULL"),
+        ),
+    )
 
     id = Column(BigInteger, primary_key=True, index=True)
     household_id = Column(BigInteger, ForeignKey("households.id", ondelete="CASCADE"), nullable=False)
     name_raw = Column(String, nullable=False)
     name_norm = Column(String, nullable=False, index=True)
-    barcode = Column(String, nullable=True, index=True)  # Scanned package barcode (e.g. EAN-13)
+    barcode = Column(String, nullable=True)  # Scanned package barcode (e.g. EAN-13)
     quantity = Column(Integer, nullable=False, default=0)
     description = Column(Text, nullable=True)  # For DRLZ description
     drlz_link = Column(Text, nullable=True)  # Link to DRLZ medication page

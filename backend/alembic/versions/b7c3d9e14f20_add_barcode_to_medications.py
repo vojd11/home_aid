@@ -6,7 +6,6 @@ Create Date: 2026-07-23 00:00:00.000000
 
 """
 from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'b7c3d9e14f20'
@@ -16,11 +15,15 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add scanned package barcode column to medications and index it for lookups
-    op.add_column('medications', sa.Column('barcode', sa.String(), nullable=True))
-    op.create_index('ix_medications_barcode', 'medications', ['barcode'])
+    # Idempotent: the app applies the same change on startup (app/db/init_db.py)
+    op.execute("ALTER TABLE medications ADD COLUMN IF NOT EXISTS barcode VARCHAR")
+    # A barcode identifies at most one medication per household
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_medications_household_barcode "
+        "ON medications (household_id, barcode) WHERE barcode IS NOT NULL"
+    )
 
 
 def downgrade() -> None:
-    op.drop_index('ix_medications_barcode', table_name='medications')
+    op.drop_index('uq_medications_household_barcode', table_name='medications')
     op.drop_column('medications', 'barcode')

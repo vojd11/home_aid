@@ -30,6 +30,38 @@ class MedicationService:
         normalized = re.sub(r'[^\w\s\u0400-\u04FF]', '', normalized)
         return normalized
 
+    def normalize_barcode(self, barcode: Optional[str]) -> Optional[str]:
+        """Normalize a scanned barcode; blank values mean no barcode"""
+        if barcode is None:
+            return None
+        return barcode.strip() or None
+
+    async def ensure_barcode_available(
+        self,
+        household_id: int,
+        barcode: Optional[str],
+        exclude_medication_id: Optional[int] = None
+    ) -> None:
+        """Reject a barcode already used by another medication in the household"""
+        if not barcode:
+            return
+
+        query = select(Medication.id).where(
+            and_(
+                Medication.household_id == household_id,
+                Medication.barcode == barcode
+            )
+        )
+        if exclude_medication_id is not None:
+            query = query.where(Medication.id != exclude_medication_id)
+
+        result = await self.db.execute(query)
+        if result.first():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Medication with this barcode already exists in household"
+            )
+
     async def get_or_create_tags(self, household_id: int, tag_names: List[str]) -> List[Tag]:
         """Get existing tags or create new ones"""
         tags = []
@@ -82,12 +114,15 @@ class MedicationService:
                 detail="Medication with this name already exists in household"
             )
 
+        barcode = self.normalize_barcode(medication_data.barcode)
+        await self.ensure_barcode_available(household_id, barcode)
+
         # Create medication
         medication = Medication(
             household_id=household_id,
             name_raw=medication_data.name,
             name_norm=name_norm,
-            barcode=medication_data.barcode,
+            barcode=barcode,
             quantity=medication_data.quantity,
             description=medication_data.description,
             drlz_link=medication_data.drlz_link,
@@ -219,21 +254,19 @@ class MedicationService:
         self, household_id: int, barcode: str
     ) -> Optional[MedicationResponse]:
         """Find a medication in a household by its scanned barcode."""
-        barcode = (barcode or "").strip()
+        barcode = self.normalize_barcode(barcode)
         if not barcode:
             return None
 
         result = await self.db.execute(
-            select(Medication)
-            .where(
+            select(Medication).where(
                 and_(
                     Medication.household_id == household_id,
                     Medication.barcode == barcode
                 )
             )
-            .order_by(Medication.id)
         )
-        medication = result.scalars().first()
+        medication = result.scalar_one_or_none()
         if not medication:
             return None
 
@@ -304,7 +337,14 @@ class MedicationService:
 
         old_quantity = medication.quantity
         update_data = medication_update.dict(exclude_unset=True)
-        
+
+        # Handle barcode update
+        if "barcode" in update_data:
+            update_data["barcode"] = self.normalize_barcode(update_data["barcode"])
+            await self.ensure_barcode_available(
+                household_id, update_data["barcode"], exclude_medication_id=medication_id
+            )
+
         # Handle name update
         if "name" in update_data:
             medication.name_raw = update_data["name"]
