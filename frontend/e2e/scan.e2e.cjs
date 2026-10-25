@@ -2,22 +2,26 @@
 // Chromium on Linux has no native BarcodeDetector, so this exercises the same
 // ZXing fallback that iOS Safari uses. The API is mocked; no backend needed.
 //
-// STATUS: passes (headless Chromium, ZXing path, 390x844 mobile viewport): 14 checks
-// in 3 scenarios. A known barcode is decoded from the camera and Add/Subtract change
+// STATUS: passes (headless Chromium, ZXing path, 390x844 mobile viewport): 16 checks
+// in 4 scenarios (scenario 4 runs when the DataMatrix video is passed). A known barcode is decoded from the camera and Add/Subtract change
 // its quantity. An unknown barcode offers "Create new medication", and Link barcode
 // attaches it to an existing one; a rescan never shows the previous result meanwhile.
 // A plain-HTTP origin explains the camera needs HTTPS and offers manual entry. The
 // camera is released after each scan, and the script stops Vite and exits on its own.
+// With a DataMatrix video (optional 5th argument), a camera that sees only the
+// per-pack GS1 DataMatrix scans nothing.
 //
 // Requires Playwright with Chromium, ffmpeg, and `npm ci` run in frontend/. From frontend/:
 //   python3 e2e/gen_barcode.py 482000000001 /tmp/barcode.pgm        # prints 4820000000017
 //   ffmpeg -loop 1 -i /tmp/barcode.pgm -t 2 -r 15 -vf format=yuv420p /tmp/barcode.y4m
-//   node e2e/scan.e2e.cjs 4820000000017 /tmp/barcode.y4m /tmp <non-localhost LAN IP>
+//   node e2e/gen_datamatrix.cjs 0104820000000017215SERIAL0001 /tmp/datamatrix.pgm
+//   ffmpeg -loop 1 -i /tmp/datamatrix.pgm -t 2 -r 15 -vf format=yuv420p /tmp/datamatrix.y4m
+//   node e2e/scan.e2e.cjs 4820000000017 /tmp/barcode.y4m /tmp <non-localhost LAN IP> /tmp/datamatrix.y4m
 const { chromium } = require('playwright')
 const { spawn } = require('child_process')
 const path = require('path')
 
-const [BARCODE, VIDEO, OUT, LAN_IP] = process.argv.slice(2)
+const [BARCODE, VIDEO, OUT, LAN_IP, DATAMATRIX_VIDEO] = process.argv.slice(2)
 const FRONTEND = path.resolve(__dirname, '..')
 
 const now = new Date().toISOString()
@@ -84,6 +88,36 @@ async function cameraTracks(page) {
   return page.evaluate(() => window.__tracks.map((t) => t.readyState))
 }
 
+// A browser whose camera shows `video`, logged in, with the API mocked
+async function launchBrowser(video) {
+  const browser = await chromium.launch({
+    args: [
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      `--use-file-for-fake-video-capture=${video}`,
+    ],
+  })
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+    serviceWorkers: 'block', permissions: ['camera'],
+  })
+  await context.addInitScript(() => {
+    localStorage.setItem('access_token', 'test-token')
+    localStorage.setItem('refresh_token', 'test-refresh')
+    window.__tracks = []
+    if (navigator.mediaDevices?.getUserMedia) {
+      const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+      navigator.mediaDevices.getUserMedia = async (constraints) => {
+        const stream = await original(constraints)
+        window.__tracks.push(...stream.getTracks())
+        return stream
+      }
+    }
+  })
+  await context.route('**/api/v1/**', handleApi)
+  return { browser, context }
+}
+
 ;(async () => {
   // Run Vite's own entry point rather than `npx vite`: npx starts Vite as a
   // grandchild, so server.kill() would only stop npx and leave Vite running,
@@ -99,33 +133,10 @@ async function cameraTracks(page) {
     server.on('exit', (code) => reject(new Error('vite exited ' + code)))
   })
 
-  let browser
+  const browsers = []
   try {
-    browser = await chromium.launch({
-      args: [
-        '--use-fake-ui-for-media-stream',
-        '--use-fake-device-for-media-stream',
-        `--use-file-for-fake-video-capture=${VIDEO}`,
-      ],
-    })
-    const context = await browser.newContext({
-      viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
-      serviceWorkers: 'block', permissions: ['camera'],
-    })
-    await context.addInitScript(() => {
-      localStorage.setItem('access_token', 'test-token')
-      localStorage.setItem('refresh_token', 'test-refresh')
-      window.__tracks = []
-      if (navigator.mediaDevices?.getUserMedia) {
-        const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
-        navigator.mediaDevices.getUserMedia = async (constraints) => {
-          const stream = await original(constraints)
-          window.__tracks.push(...stream.getTracks())
-          return stream
-        }
-      }
-    })
-    await context.route('**/api/v1/**', handleApi)
+    const { browser, context } = await launchBrowser(VIDEO)
+    browsers.push(browser)
     const page = await context.newPage()
     page.on('pageerror', (e) => console.log('  [pageerror]', e.message))
 
@@ -180,10 +191,25 @@ async function cameraTracks(page) {
     check(await insecure.getByLabel('Barcode number').isVisible(), 'manual barcode entry is offered instead')
     await screenshot(insecure, '4-https-hint')
 
+    if (DATAMATRIX_VIDEO) {
+      console.log('Scenario 4: camera sees only the per-pack DataMatrix → nothing is scanned')
+      const dm = await launchBrowser(DATAMATRIX_VIDEO)
+      browsers.push(dm.browser)
+      const dmPage = await dm.context.newPage()
+      const lookups = () => calls.filter((c) => c.includes('/medications/lookup')).length
+      const lookupsBefore = lookups()
+      await openScanDialog(dmPage, 'http://localhost:3000')
+      await dmPage.getByText('Point your camera at the barcode').waitFor()
+      // ZXing reads a code it accepts within a second; give it several seconds of frames
+      await dmPage.waitForTimeout(4000)
+      check(lookups() === lookupsBefore, 'the DataMatrix (per-pack serial) is not taken as the barcode')
+      check(await dmPage.getByText('Point your camera at the barcode').isVisible(), 'the dialog keeps scanning')
+    }
+
     console.log('\nALL CHECKS PASSED')
   } finally {
     try {
-      await browser?.close()
+      await Promise.all(browsers.map((b) => b.close()))
     } finally {
       server.kill()
       await serverExited
