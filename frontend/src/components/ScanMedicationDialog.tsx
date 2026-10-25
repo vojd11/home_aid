@@ -30,7 +30,10 @@ import {
 } from '@mui/icons-material'
 import api, { medicationApi } from '../lib/api'
 
-const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code']
+// Only retail product codes (GTIN): the same on every pack of a medication.
+// Packs also carry a GS1 DataMatrix (and sometimes QR or Code 128) holding a
+// per-pack serial number, batch or URL, which would never match the next pack.
+const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e']
 
 // Browsers only expose the camera on secure pages (HTTPS or localhost)
 const isSecureContext = typeof window !== 'undefined' && window.isSecureContext
@@ -151,11 +154,7 @@ export default function ScanMedicationDialog({
     try {
       if (barcodeDetectorSupported) {
         if (!detectorRef.current) {
-          try {
-            detectorRef.current = new window.BarcodeDetector({ formats: BARCODE_FORMATS })
-          } catch {
-            detectorRef.current = new window.BarcodeDetector()
-          }
+          detectorRef.current = new window.BarcodeDetector({ formats: BARCODE_FORMATS })
         }
 
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -171,15 +170,24 @@ export default function ScanMedicationDialog({
           videoRef.current.srcObject = stream
           await videoRef.current.play()
         }
+        if (session !== sessionRef.current) return
         runningRef.current = true
         rafRef.current = requestAnimationFrame(scanLoop)
       } else {
         // No native BarcodeDetector (e.g. iOS Safari): decode video frames with
         // ZXing, loaded on demand to keep it out of the main bundle
-        const { BrowserMultiFormatReader } = await import('@zxing/browser')
+        const { BrowserMultiFormatReader, BarcodeFormat } = await import('@zxing/browser')
         if (session !== sessionRef.current) return
 
-        const controls = await new BrowserMultiFormatReader().decodeFromConstraints(
+        const reader = new BrowserMultiFormatReader()
+        // Same retail codes as BARCODE_FORMATS for the native detector
+        reader.possibleFormats = [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+        ]
+        const controls = await reader.decodeFromConstraints(
           { video: { facingMode: 'environment' }, audio: false },
           videoRef.current,
           (result, _error, scanControls) => {
@@ -497,7 +505,8 @@ export default function ScanMedicationDialog({
 
                 <Divider sx={{ mb: 2 }} />
 
-                <Box sx={{ display: 'flex', gap: 2 }}>
+                {/* Stacked on phones so the labels fit on one line */}
+                <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: { xs: 1.5, sm: 2 } }}>
                   <Button
                     fullWidth
                     variant="contained"
