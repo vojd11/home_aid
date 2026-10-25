@@ -2,9 +2,14 @@
 // Chromium on Linux has no native BarcodeDetector, so this exercises the same
 // ZXing fallback that iOS Safari uses. The API is mocked; no backend needed.
 //
-// STATUS: work in progress, not yet run to completion (see PR #1 description).
+// STATUS: passes (headless Chromium, ZXing path, 390x844 mobile viewport): 14 checks
+// in 3 scenarios. A known barcode is decoded from the camera and Add/Subtract change
+// its quantity. An unknown barcode offers "Create new medication", and Link barcode
+// attaches it to an existing one; a rescan never shows the previous result meanwhile.
+// A plain-HTTP origin explains the camera needs HTTPS and offers manual entry. The
+// camera is released after each scan, and the script stops Vite and exits on its own.
 //
-// Requires Playwright with Chromium and ffmpeg:
+// Requires Playwright with Chromium, ffmpeg, and `npm ci` run in frontend/. From frontend/:
 //   python3 e2e/gen_barcode.py 482000000001 /tmp/barcode.pgm        # prints 4820000000017
 //   ffmpeg -loop 1 -i /tmp/barcode.pgm -t 2 -r 15 -vf format=yuv420p /tmp/barcode.y4m
 //   node e2e/scan.e2e.cjs 4820000000017 /tmp/barcode.y4m /tmp <non-localhost LAN IP>
