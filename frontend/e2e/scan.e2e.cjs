@@ -23,6 +23,7 @@ const med = (id, name, quantity, barcode) => ({
 })
 const meds = [med(5, 'Ibuprofen', 5, BARCODE), med(7, 'Aspirin', 2, null)]
 const calls = []
+let lookupDelayMs = 0
 
 function check(condition, message) {
   if (!condition) throw new Error('ASSERTION FAILED: ' + message)
@@ -41,6 +42,7 @@ async function handleApi(route) {
   if (p === '/households/' || p === '/households') return json([{ id: 1, name: 'Home', role: 'owner', created_at: now }])
   if (p === '/households/1/medications' && method === 'GET') return json({ medications: meds, total: meds.length, next_cursor: null, has_more: false })
   if (p === '/households/1/medications/lookup') {
+    await new Promise((resolve) => setTimeout(resolve, lookupDelayMs))
     const code = url.searchParams.get('barcode').trim()
     const found = meds.find((m) => m.barcode === code) || null
     return json({ found: !!found, barcode: code, medication: found })
@@ -143,8 +145,15 @@ async function cameraTracks(page) {
 
     console.log('Scenario 2: scan an unknown package → link it to an existing medication')
     meds[0].barcode = null
+    // Answer the lookup slowly, like a real network: until it arrives the
+    // dialog must not offer add/subtract from the previous scan of this code
+    lookupDelayMs = 1500
     await page.getByRole('button', { name: 'Scan', exact: true }).click()
+    await dialog.getByText(BARCODE, { exact: true }).waitFor({ timeout: 20000 })
+    check(await dialog.getByText('Looking up barcode…').isVisible() && !(await dialog.getByText('Ibuprofen').isVisible()),
+      'rescanning looks the barcode up again instead of showing the previous result (Ibuprofen)')
     await page.getByText('No medication with this barcode was found').waitFor({ timeout: 20000 })
+    lookupDelayMs = 0
     check(await dialog.getByRole('button', { name: 'Create new medication' }).isVisible(), 'offers to create a new medication')
     await screenshot(page, '2-not-found')
     await dialog.getByLabel('Existing medication').click()

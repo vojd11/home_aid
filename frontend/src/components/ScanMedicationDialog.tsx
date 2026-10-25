@@ -83,6 +83,10 @@ export default function ScanMedicationDialog({
     queryFn: () => medicationApi.lookupByBarcode(householdId, barcode),
     enabled: !!barcode && isOpen,
     staleTime: 0,
+    // Drop the result once the dialog moves on from this barcode. Otherwise a
+    // later scan of the same code shows the cached result while it refetches,
+    // with add/subtract enabled for a medication that may no longer match
+    gcTime: 0,
   })
 
   const foundMedication = lookup?.found ? lookup.medication : null
