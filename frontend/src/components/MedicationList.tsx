@@ -25,12 +25,14 @@ import {
   Error,
   Search,
   FilterList,
-  CheckCircle
+  CheckCircle,
+  QrCodeScanner
 } from '@mui/icons-material'
 import { Medication, MedicationList as MedicationListType } from '../types'
 import api from '../lib/api'
 import MedicationCard from './MedicationCard'
 import AddMedicationDialog from './AddMedicationDialog'
+import ScanMedicationDialog from './ScanMedicationDialog'
 import SearchBar from './SearchBar'
 
 interface MedicationListProps {
@@ -42,7 +44,15 @@ export default function MedicationList({ householdId, householdName }: Medicatio
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [isScanDialogOpen, setIsScanDialogOpen] = useState(false)
+  const [scanBarcode, setScanBarcode] = useState('')
   const queryClient = useQueryClient()
+
+  // Open the Add dialog prefilled with a scanned (but unknown) barcode
+  const handleCreateForBarcode = (barcode: string) => {
+    setScanBarcode(barcode)
+    setIsAddDialogOpen(true)
+  }
 
   // Fetch medications for the household (without search/filter parameters)
   const { data: medicationData, isLoading, error } = useQuery({
@@ -218,24 +228,42 @@ export default function MedicationList({ householdId, householdName }: Medicatio
               )}
             </Box>
           </Box>
-          <Button
-            onClick={() => setIsAddDialogOpen(true)}
-            variant="contained"
-            size="large"
-            startIcon={<Add />}
-            sx={{
-              borderRadius: 2,
-              textTransform: 'none',
-              fontWeight: 600,
-              px: 3,
-              background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-              '&:hover': {
-                background: 'linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%)',
-              },
-            }}
-          >
-            Add Medication
-          </Button>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+            <Button
+              onClick={() => setIsScanDialogOpen(true)}
+              variant="outlined"
+              size="large"
+              startIcon={<QrCodeScanner />}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'none',
+                fontWeight: 600,
+                px: 3,
+                borderColor: 'primary.main',
+                color: 'primary.main',
+              }}
+            >
+              Scan
+            </Button>
+            <Button
+              onClick={() => setIsAddDialogOpen(true)}
+              variant="contained"
+              size="large"
+              startIcon={<Add />}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'none',
+                fontWeight: 600,
+                px: 3,
+                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                '&:hover': {
+                  background: 'linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%)',
+                },
+              }}
+            >
+              Add Medication
+            </Button>
+          </Box>
         </Box>
       </Paper>
 
@@ -437,8 +465,20 @@ export default function MedicationList({ householdId, householdName }: Medicatio
       {/* Add Medication Dialog */}
       <AddMedicationDialog
         isOpen={isAddDialogOpen}
-        onClose={() => setIsAddDialogOpen(false)}
+        onClose={() => {
+          setIsAddDialogOpen(false)
+          setScanBarcode('')
+        }}
         householdId={householdId}
+        initialBarcode={scanBarcode}
+      />
+
+      {/* Scan Medication Dialog */}
+      <ScanMedicationDialog
+        isOpen={isScanDialogOpen}
+        onClose={() => setIsScanDialogOpen(false)}
+        householdId={householdId}
+        onCreateForBarcode={handleCreateForBarcode}
       />
     </Container>
   )

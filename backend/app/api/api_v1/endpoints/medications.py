@@ -9,7 +9,8 @@ from app.schemas.medication import (
     MedicationCreate,
     MedicationUpdate,
     MedicationResponse,
-    MedicationList
+    MedicationList,
+    MedicationLookupResponse
 )
 from app.schemas.store_prices import StorePricesResponse
 from app.services.medication import MedicationService
@@ -17,6 +18,10 @@ from app.services.household import HouseholdService
 from app.services.store_prices import StorePriceService
 
 router = APIRouter()
+
+# Upper bound for a single increment/decrement; keeps quantity well inside the
+# Integer column range
+MAX_QUANTITY_CHANGE = 10000
 
 
 async def verify_household_access(
@@ -78,6 +83,30 @@ async def create_medication(
     )
 
 
+@router.get("/{household_id}/medications/lookup", response_model=MedicationLookupResponse)
+async def lookup_medication_by_barcode(
+    household_id: int,
+    barcode: str = Query(..., description="Scanned package barcode (e.g. EAN-13)"),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+) -> MedicationLookupResponse:
+    """Look up a medication in the household by scanned barcode.
+
+    Returns whether a matching medication already exists. The mobile scan flow
+    uses this to decide between adjusting an existing item's quantity or
+    suggesting the creation of a new medication.
+    """
+    await verify_household_access(household_id, current_user, db, "viewer")
+
+    medication_service = MedicationService(db)
+    medication = await medication_service.get_medication_by_barcode(household_id, barcode)
+    return MedicationLookupResponse(
+        found=medication is not None,
+        barcode=barcode.strip(),
+        medication=medication
+    )
+
+
 @router.get("/{household_id}/medications/{medication_id}", response_model=MedicationResponse)
 async def get_medication(
     household_id: int,
@@ -118,11 +147,31 @@ async def update_medication(
     )
 
 
+@router.post("/{household_id}/medications/{medication_id}/increment", response_model=MedicationResponse)
+async def increment_medication(
+    household_id: int,
+    medication_id: int,
+    amount: int = Query(1, ge=1, le=MAX_QUANTITY_CHANGE),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+) -> MedicationResponse:
+    """Increment medication quantity by specified amount (default: 1)"""
+    await verify_household_access(household_id, current_user, db, "editor")
+
+    medication_service = MedicationService(db)
+    return await medication_service.increment_medication(
+        medication_id=medication_id,
+        household_id=household_id,
+        amount=amount,
+        user_id=current_user.id
+    )
+
+
 @router.post("/{household_id}/medications/{medication_id}/decrement", response_model=MedicationResponse)
 async def decrement_medication(
     household_id: int,
     medication_id: int,
-    amount: int = 1,
+    amount: int = Query(1, ge=1, le=MAX_QUANTITY_CHANGE),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> MedicationResponse:

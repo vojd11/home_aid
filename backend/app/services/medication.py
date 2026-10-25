@@ -30,6 +30,38 @@ class MedicationService:
         normalized = re.sub(r'[^\w\s\u0400-\u04FF]', '', normalized)
         return normalized
 
+    def normalize_barcode(self, barcode: Optional[str]) -> Optional[str]:
+        """Normalize a scanned barcode; blank values mean no barcode"""
+        if barcode is None:
+            return None
+        return barcode.strip() or None
+
+    async def ensure_barcode_available(
+        self,
+        household_id: int,
+        barcode: Optional[str],
+        exclude_medication_id: Optional[int] = None
+    ) -> None:
+        """Reject a barcode already used by another medication in the household"""
+        if not barcode:
+            return
+
+        query = select(Medication.id).where(
+            and_(
+                Medication.household_id == household_id,
+                Medication.barcode == barcode
+            )
+        )
+        if exclude_medication_id is not None:
+            query = query.where(Medication.id != exclude_medication_id)
+
+        result = await self.db.execute(query)
+        if result.first():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Medication with this barcode already exists in household"
+            )
+
     async def get_or_create_tags(self, household_id: int, tag_names: List[str]) -> List[Tag]:
         """Get existing tags or create new ones"""
         tags = []
@@ -82,11 +114,15 @@ class MedicationService:
                 detail="Medication with this name already exists in household"
             )
 
+        barcode = self.normalize_barcode(medication_data.barcode)
+        await self.ensure_barcode_available(household_id, barcode)
+
         # Create medication
         medication = Medication(
             household_id=household_id,
             name_raw=medication_data.name,
             name_norm=name_norm,
+            barcode=barcode,
             quantity=medication_data.quantity,
             description=medication_data.description,
             drlz_link=medication_data.drlz_link,
@@ -214,6 +250,92 @@ class MedicationService:
         
         return await self._medication_to_response(medication)
 
+    async def get_medication_by_barcode(
+        self, household_id: int, barcode: str
+    ) -> Optional[MedicationResponse]:
+        """Find a medication in a household by its scanned barcode."""
+        barcode = self.normalize_barcode(barcode)
+        if not barcode:
+            return None
+
+        result = await self.db.execute(
+            select(Medication).where(
+                and_(
+                    Medication.household_id == household_id,
+                    Medication.barcode == barcode
+                )
+            )
+        )
+        medication = result.scalar_one_or_none()
+        if not medication:
+            return None
+
+        return await self._medication_to_response(medication)
+
+    async def _adjust_quantity(
+        self,
+        medication_id: int,
+        household_id: int,
+        delta: int,
+        reason: EventReason,
+        user_id: int
+    ) -> MedicationResponse:
+        """Change medication quantity by delta and log the inventory event"""
+        # Lock the row so concurrent adjustments (e.g. two people scanning the
+        # same package at once) don't overwrite each other's change
+        result = await self.db.execute(
+            select(Medication)
+            .where(
+                and_(
+                    Medication.id == medication_id,
+                    Medication.household_id == household_id
+                )
+            )
+            .with_for_update()
+        )
+        medication = result.scalar_one_or_none()
+        if not medication:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Medication not found"
+            )
+
+        # Check if we can decrement
+        if medication.quantity + delta < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot decrement by {-delta}. Current quantity: {medication.quantity}"
+            )
+
+        medication.quantity += delta
+        medication.updated_at = datetime.utcnow()
+
+        # Log inventory event
+        inventory_event = InventoryEvent(
+            medication_id=medication.id,
+            user_id=user_id,
+            delta=delta,
+            reason=reason
+        )
+        self.db.add(inventory_event)
+
+        await self.db.commit()
+        await self.db.refresh(medication)
+
+        return await self._medication_to_response(medication)
+
+    async def increment_medication(
+        self,
+        medication_id: int,
+        household_id: int,
+        amount: int,
+        user_id: int
+    ) -> MedicationResponse:
+        """Increment medication quantity (e.g. when restocking a scanned item)."""
+        return await self._adjust_quantity(
+            medication_id, household_id, amount, EventReason.ADD, user_id
+        )
+
     async def update_medication(
         self,
         medication_id: int,
@@ -239,7 +361,14 @@ class MedicationService:
 
         old_quantity = medication.quantity
         update_data = medication_update.dict(exclude_unset=True)
-        
+
+        # Handle barcode update
+        if "barcode" in update_data:
+            update_data["barcode"] = self.normalize_barcode(update_data["barcode"])
+            await self.ensure_barcode_available(
+                household_id, update_data["barcode"], exclude_medication_id=medication_id
+            )
+
         # Handle name update
         if "name" in update_data:
             medication.name_raw = update_data["name"]
@@ -294,45 +423,9 @@ class MedicationService:
         user_id: int
     ) -> MedicationResponse:
         """Decrement medication quantity"""
-        result = await self.db.execute(
-            select(Medication).where(
-                and_(
-                    Medication.id == medication_id,
-                    Medication.household_id == household_id
-                )
-            )
+        return await self._adjust_quantity(
+            medication_id, household_id, -amount, EventReason.DECREMENT, user_id
         )
-        medication = result.scalar_one_or_none()
-        if not medication:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Medication not found"
-            )
-
-        # Check if we can decrement
-        if medication.quantity < amount:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot decrement by {amount}. Current quantity: {medication.quantity}"
-            )
-
-        # Update quantity
-        medication.quantity -= amount
-        medication.updated_at = datetime.utcnow()
-
-        # Log inventory event
-        inventory_event = InventoryEvent(
-            medication_id=medication.id,
-            user_id=user_id,
-            delta=-amount,
-            reason=EventReason.DECREMENT
-        )
-        self.db.add(inventory_event)
-
-        await self.db.commit()
-        await self.db.refresh(medication)
-
-        return await self._medication_to_response(medication)
 
     async def delete_medication(
         self,
@@ -374,6 +467,7 @@ class MedicationService:
             household_id=medication.household_id,
             name=medication.name_raw,
             name_norm=medication.name_norm,
+            barcode=medication.barcode,
             quantity=medication.quantity,
             description=medication.description,
             drlz_link=medication.drlz_link,
