@@ -272,21 +272,26 @@ class MedicationService:
 
         return await self._medication_to_response(medication)
 
-    async def increment_medication(
+    async def _adjust_quantity(
         self,
         medication_id: int,
         household_id: int,
-        amount: int,
+        delta: int,
+        reason: EventReason,
         user_id: int
     ) -> MedicationResponse:
-        """Increment medication quantity (e.g. when restocking a scanned item)."""
+        """Change medication quantity by delta and log the inventory event"""
+        # Lock the row so concurrent adjustments (e.g. two people scanning the
+        # same package at once) don't overwrite each other's change
         result = await self.db.execute(
-            select(Medication).where(
+            select(Medication)
+            .where(
                 and_(
                     Medication.id == medication_id,
                     Medication.household_id == household_id
                 )
             )
+            .with_for_update()
         )
         medication = result.scalar_one_or_none()
         if not medication:
@@ -295,15 +300,22 @@ class MedicationService:
                 detail="Medication not found"
             )
 
-        medication.quantity += amount
+        # Check if we can decrement
+        if medication.quantity + delta < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot decrement by {-delta}. Current quantity: {medication.quantity}"
+            )
+
+        medication.quantity += delta
         medication.updated_at = datetime.utcnow()
 
         # Log inventory event
         inventory_event = InventoryEvent(
             medication_id=medication.id,
             user_id=user_id,
-            delta=amount,
-            reason=EventReason.ADD
+            delta=delta,
+            reason=reason
         )
         self.db.add(inventory_event)
 
@@ -311,6 +323,18 @@ class MedicationService:
         await self.db.refresh(medication)
 
         return await self._medication_to_response(medication)
+
+    async def increment_medication(
+        self,
+        medication_id: int,
+        household_id: int,
+        amount: int,
+        user_id: int
+    ) -> MedicationResponse:
+        """Increment medication quantity (e.g. when restocking a scanned item)."""
+        return await self._adjust_quantity(
+            medication_id, household_id, amount, EventReason.ADD, user_id
+        )
 
     async def update_medication(
         self,
@@ -399,45 +423,9 @@ class MedicationService:
         user_id: int
     ) -> MedicationResponse:
         """Decrement medication quantity"""
-        result = await self.db.execute(
-            select(Medication).where(
-                and_(
-                    Medication.id == medication_id,
-                    Medication.household_id == household_id
-                )
-            )
+        return await self._adjust_quantity(
+            medication_id, household_id, -amount, EventReason.DECREMENT, user_id
         )
-        medication = result.scalar_one_or_none()
-        if not medication:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Medication not found"
-            )
-
-        # Check if we can decrement
-        if medication.quantity < amount:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot decrement by {amount}. Current quantity: {medication.quantity}"
-            )
-
-        # Update quantity
-        medication.quantity -= amount
-        medication.updated_at = datetime.utcnow()
-
-        # Log inventory event
-        inventory_event = InventoryEvent(
-            medication_id=medication.id,
-            user_id=user_id,
-            delta=-amount,
-            reason=EventReason.DECREMENT
-        )
-        self.db.add(inventory_event)
-
-        await self.db.commit()
-        await self.db.refresh(medication)
-
-        return await self._medication_to_response(medication)
 
     async def delete_medication(
         self,

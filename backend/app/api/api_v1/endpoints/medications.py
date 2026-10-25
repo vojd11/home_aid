@@ -19,6 +19,10 @@ from app.services.store_prices import StorePriceService
 
 router = APIRouter()
 
+# Upper bound for a single increment/decrement; keeps quantity well inside the
+# Integer column range
+MAX_QUANTITY_CHANGE = 10000
+
 
 async def verify_household_access(
     household_id: int,
@@ -147,18 +151,12 @@ async def update_medication(
 async def increment_medication(
     household_id: int,
     medication_id: int,
-    amount: int = 1,
+    amount: int = Query(1, ge=1, le=MAX_QUANTITY_CHANGE),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> MedicationResponse:
     """Increment medication quantity by specified amount (default: 1)"""
     await verify_household_access(household_id, current_user, db, "editor")
-
-    if amount < 1:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Increment amount must be at least 1"
-        )
 
     medication_service = MedicationService(db)
     return await medication_service.increment_medication(
@@ -173,7 +171,7 @@ async def increment_medication(
 async def decrement_medication(
     household_id: int,
     medication_id: int,
-    amount: int = 1,
+    amount: int = Query(1, ge=1, le=MAX_QUANTITY_CHANGE),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ) -> MedicationResponse:

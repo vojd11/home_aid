@@ -7,6 +7,7 @@ These run against a real PostgreSQL database given by TEST_DATABASE_URL
 database is dropped and recreated, so never point it at a database with data.
 """
 
+import asyncio
 import os
 
 import pytest
@@ -235,3 +236,59 @@ async def test_lookup_route_is_not_shadowed_by_medication_id_route(session):
             assert single.json()["barcode"] == "111"
     finally:
         app.dependency_overrides.clear()
+
+
+async def test_concurrent_quantity_changes_are_not_lost(engine, session):
+    user, household = await _create_household(session, "a@example.com")
+    medication = await _create(MedicationService(session), household, user, "Ibuprofen", quantity=5)
+    make_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Several household members tap "Add 1" on the same package at once
+    async def add_one():
+        async with make_session() as db:
+            await MedicationService(db).increment_medication(medication.id, household.id, 1, user.id)
+
+    await asyncio.gather(*(add_one() for _ in range(5)))
+
+    quantity = await session.scalar(
+        text("SELECT quantity FROM medications WHERE id = :id"), {"id": medication.id}
+    )
+    assert quantity == 10
+
+
+async def test_quantity_change_amount_is_validated(session):
+    user, household = await _create_household(session, "a@example.com")
+    medication = await _create(MedicationService(session), household, user, "Ibuprofen", quantity=5)
+
+    async def override_get_db():
+        yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_active_user] = lambda: user
+    try:
+        async with AsyncClient(app=app, base_url="http://test") as client:
+            base = f"/api/v1/households/{household.id}/medications/{medication.id}"
+            for action in ("increment", "decrement"):
+                for amount in (0, -5, 10001):
+                    response = await client.post(f"{base}/{action}", params={"amount": amount})
+                    assert response.status_code == 422, (action, amount)
+    finally:
+        app.dependency_overrides.clear()
+
+    quantity = await session.scalar(
+        text("SELECT quantity FROM medications WHERE id = :id"), {"id": medication.id}
+    )
+    assert quantity == 5
+
+
+async def test_startup_barcode_cleanup_runs_only_while_index_is_missing(session):
+    user, household = await _create_household(session, "a@example.com")
+    await _create(MedicationService(session), household, user, "Ibuprofen", barcode="111")
+    # A blank barcode the API would never store; the one-time cleanup would clear it
+    await session.execute(text("UPDATE medications SET barcode = ' '"))
+    await session.commit()
+
+    # Later restarts must not re-run the full-table cleanup
+    await init_db_module.init_db()
+
+    assert await session.scalar(text("SELECT barcode FROM medications")) == " "
