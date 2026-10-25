@@ -67,6 +67,12 @@ async function openScanDialog(page, origin) {
   await page.getByRole('button', { name: 'Scan', exact: true }).click()
 }
 
+// Fast-forward CSS transitions first: the HTTPS hint is there as soon as the
+// dialog opens, so without this the capture catches MUI's fade-in half done
+function screenshot(page, name) {
+  return page.screenshot({ path: `${OUT}/${name}.png`, animations: 'disabled' })
+}
+
 async function cameraTracks(page) {
   return page.evaluate(() => window.__tracks.map((t) => t.readyState))
 }
@@ -125,7 +131,7 @@ async function cameraTracks(page) {
     check(await dialog.getByText('Ibuprofen').isVisible(), 'dialog shows the matched medication')
     let tracks = await cameraTracks(page)
     check(tracks.length > 0 && tracks.every((s) => s === 'ended'), `camera released after the scan (tracks: ${tracks.join(',')})`)
-    await page.screenshot({ path: `${OUT}/1-found.png` })
+    await screenshot(page, '1-found')
 
     await dialog.getByRole('button', { name: 'Add 1' }).click()
     await dialog.getByText('6 items').waitFor()
@@ -140,7 +146,7 @@ async function cameraTracks(page) {
     await page.getByRole('button', { name: 'Scan', exact: true }).click()
     await page.getByText('No medication with this barcode was found').waitFor({ timeout: 20000 })
     check(await dialog.getByRole('button', { name: 'Create new medication' }).isVisible(), 'offers to create a new medication')
-    await page.screenshot({ path: `${OUT}/2-not-found.png`, fullPage: true })
+    await screenshot(page, '2-not-found')
     await dialog.getByLabel('Existing medication').click()
     await page.getByRole('option', { name: 'Aspirin' }).click()
     await dialog.getByRole('button', { name: 'Link barcode' }).click()
@@ -150,7 +156,7 @@ async function cameraTracks(page) {
     check(await dialog.getByRole('heading', { name: 'Aspirin' }).isVisible(), 'dialog switches to add/subtract for Aspirin')
     tracks = await cameraTracks(page)
     check(tracks.every((s) => s === 'ended'), `no camera track left running (tracks: ${tracks.join(',')})`)
-    await page.screenshot({ path: `${OUT}/3-linked.png` })
+    await screenshot(page, '3-linked')
 
     console.log('Scenario 3: plain-HTTP origin → explains that the camera needs HTTPS')
     const insecure = await context.newPage()
@@ -158,7 +164,7 @@ async function cameraTracks(page) {
     check(!(await insecure.evaluate(() => window.isSecureContext)), `http://${LAN_IP} is not a secure context`)
     await insecure.getByText('The camera only works when the app is opened over HTTPS').waitFor()
     check(await insecure.getByLabel('Barcode number').isVisible(), 'manual barcode entry is offered instead')
-    await insecure.screenshot({ path: `${OUT}/4-https-hint.png` })
+    await screenshot(insecure, '4-https-hint')
 
     console.log('\nALL CHECKS PASSED')
   } finally {
