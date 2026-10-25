@@ -72,23 +72,29 @@ async function cameraTracks(page) {
 }
 
 ;(async () => {
-  const server = spawn('npx', ['vite', '--port', '3000', '--strictPort', '--host', '0.0.0.0'], {
-    cwd: FRONTEND, env: { ...process.env, VITE_API_URL: '' },
+  // Run Vite's own entry point rather than `npx vite`: npx starts Vite as a
+  // grandchild, so server.kill() would only stop npx and leave Vite running,
+  // keeping port 3000 busy and this script's stdout pipe open (it never exits)
+  const viteBin = path.join(FRONTEND, 'node_modules', 'vite', 'bin', 'vite.js')
+  const server = spawn(process.execPath, [viteBin, '--port', '3000', '--strictPort', '--host', '0.0.0.0'], {
+    cwd: FRONTEND, env: { ...process.env, VITE_API_URL: '' }, stdio: ['ignore', 'pipe', 'inherit'],
   })
+  const serverExited = new Promise((resolve) => server.once('exit', resolve))
   await new Promise((resolve, reject) => {
     // Vite colors its banner, so strip ANSI codes before looking for the URL
     server.stdout.on('data', (d) => d.toString().replace(/\x1b\[[0-9;]*m/g, '').includes('localhost:3000') && resolve())
     server.on('exit', (code) => reject(new Error('vite exited ' + code)))
   })
 
-  const browser = await chromium.launch({
-    args: [
-      '--use-fake-ui-for-media-stream',
-      '--use-fake-device-for-media-stream',
-      `--use-file-for-fake-video-capture=${VIDEO}`,
-    ],
-  })
+  let browser
   try {
+    browser = await chromium.launch({
+      args: [
+        '--use-fake-ui-for-media-stream',
+        '--use-fake-device-for-media-stream',
+        `--use-file-for-fake-video-capture=${VIDEO}`,
+      ],
+    })
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
       serviceWorkers: 'block', permissions: ['camera'],
@@ -156,8 +162,12 @@ async function cameraTracks(page) {
 
     console.log('\nALL CHECKS PASSED')
   } finally {
-    await browser.close()
-    server.kill()
+    try {
+      await browser?.close()
+    } finally {
+      server.kill()
+      await serverExited
+    }
   }
 })().catch((e) => {
   console.error(e.message)
